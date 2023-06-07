@@ -89,7 +89,7 @@ It is strongly recommended to persistify those as objects rather than lists of l
   assumed of type F by default. The list of currently supported
   types is given below:
    - `C` : a character string terminated by the 0 character
-   - `B` : an 8 bit signed integer (`Char_t`); Treated as a character when in an array.
+   - `B` : an 8 bit signed integer (`Char_t`)
    - `b` : an 8 bit unsigned integer (`UChar_t`)
    - `S` : a 16 bit signed integer (`Short_t`)
    - `s` : a 16 bit unsigned integer (`UShort_t`)
@@ -110,7 +110,6 @@ It is strongly recommended to persistify those as objects rather than lists of l
    - A float array with fixed size: "myArrfloat[42]/F"
    - An double array with variable size, held by the `myvar` column: "myArrdouble[myvar]/D"
    - An Double32_t array with variable size, held by the `myvar` column , with values between 0 and 16: "myArr[myvar]/d[0,10]"
-   - The `myvar` column, which holds the variable size, **MUST** be an `Int_t` (/I).
 
 - If the address points to a single numerical variable, the leaflist is optional:
 ~~~ {.cpp}
@@ -125,8 +124,8 @@ It is strongly recommended to persistify those as objects rather than lists of l
 - In case of the truncated floating point types (Float16_t and Double32_t) you can
   furthermore specify the range in the style [xmin,xmax] or [xmin,xmax,nbits] after
   the type character. For example, for storing a variable size array `myArr` of
-  `Double32_t` with values within a range of `[0, 2*pi]` and the size of which is stored
-  in an `Int_t` (/I) branch called `myArrSize`, the syntax for the `leaflist` string would
+  `Double32_t` with values within a range of `[0, 2*pi]` and the size of which is
+  stored in a branch called `myArrSize`, the syntax for the `leaflist` string would
   be: `myArr[myArrSize]/d[0,twopi]`. Of course the number of bits could be specified,
   the standard rules of opaque typedefs annotation are valid. For example, if only
   18 bits were sufficient, the syntax would become: `myArr[myArrSize]/d[0,twopi,18]`
@@ -453,6 +452,9 @@ constexpr Float_t kNEntriesResortInv = 1.f/kNEntriesResort;
 
 Int_t    TTree::fgBranchStyle = 1;  // Use new TBranch style with TBranchElement.
 Long64_t TTree::fgMaxTreeSize = 100000000000LL;
+
+UInt_t TTree::fMaxBasketSize = 0; // 0 by default, will be easier to check if changed
+
 
 ClassImp(TTree);
 
@@ -1939,7 +1941,7 @@ Int_t TTree::Branch(const char* foldername, Int_t bufsize /* = 32000 */, Int_t s
 ///      variable. If the first variable does not have a type, it is assumed
 ///      of type F by default. The list of currently supported types is given below:
 ///         - `C` : a character string terminated by the 0 character
-///         - `B` : an 8 bit signed integer (`Char_t`); Treated as a character when in an array.
+///         - `B` : an 8 bit signed integer (`Char_t`)
 ///         - `b` : an 8 bit unsigned integer (`UChar_t`)
 ///         - `S` : a 16 bit signed integer (`Short_t`)
 ///         - `s` : a 16 bit unsigned integer (`UShort_t`)
@@ -1959,7 +1961,6 @@ Int_t TTree::Branch(const char* foldername, Int_t bufsize /* = 32000 */, Int_t s
 ///         - If leaf name has the form var[nelem], where nelem is alphanumeric, then
 ///           if nelem is a leaf name, it is used as the variable size of the array,
 ///           otherwise return 0.
-///           The leaf referred to by nelem **MUST** be an int (/I),
 ///         - If leaf name has the form var[nelem], where nelem is a non-negative integer, then
 ///           it is used as the fixed size of the array.
 ///         - If leaf name has the form of a multi-dimensional array (e.g. var[nelem][nelem2])
@@ -3871,9 +3872,6 @@ Long64_t TTree::Draw(const char* varexp, const TCut& selection, Option_t* option
 ///                   vs "e2" vs "e3" and "e4" mapped on the current color palette.
 ///                   (to create histograms in the 2, 3, and 4 dimensional case,
 ///                   see section "Saving the result of Draw to an histogram")
-///   - "e1:e2:e3:e4:e5" with option "GL5D" produces a 5D plot using OpenGL. `gStyle->SetCanvasPreferGL(true)` is needed.
-///   - Any number of variables no fewer than two can be used with the options "CANDLE" and "PARA"
-///   - An arbitrary number of variables can be used with the option "GOFF"
 ///
 ///   Examples:
 ///    - "x": the simplest case, it draws a 1-Dim histogram of column x
@@ -7050,6 +7048,8 @@ Bool_t TTree::Notify()
 /// than compMin, the compression is disabled.
 ///
 /// if option ="d" an analysis report is printed.
+///
+/// Keeping in the breakpoint printf's in for now, just uncomment when needed. 
 
 void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *option)
 {
@@ -7068,11 +7068,20 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
       return;
    }
    Double_t aveSize = treeSize/nleaves;
-   UInt_t bmin = 512;
-   UInt_t bmax = 256000;
+   UInt_t bmin = 512; //originally 512
+   UInt_t bmax = 256000; // originally 256000
    Double_t memFactor = 1;
    Int_t i, oldMemsize,newMemsize,oldBaskets,newBaskets;
    i = oldMemsize = newMemsize = oldBaskets = newBaskets = 0;
+
+   UInt_t configMaxSize; //for configuring the max basket size, we'll use this temp variable. 
+
+   if(fMaxBasketSize == 0){
+      configMaxSize = 256000;
+   } else {
+      configMaxSize = fMaxBasketSize;
+   }
+   //printf("Calling OptimizeBaskets\n");
 
    //we make two passes
    //one pass to compute the relative branch buffer sizes
@@ -7086,8 +7095,11 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
          TLeaf *leaf = (TLeaf*)leaves->At(i);
          TBranch *branch = leaf->GetBranch();
          Double_t totBytes = (Double_t)branch->GetTotBytes();
-         Double_t idealFactor = totBytes/aveSize;
+         Double_t idealFactor = totBytes/aveSize; // almost always 1.00
          UInt_t sizeOfOneEntry;
+	 
+	      //printf("........ pass = %d ........\n",pass);
+
          if (branch->GetEntries() == 0) {
             // There is no data, so let's make a guess ...
             sizeOfOneEntry = aveSize;
@@ -7102,20 +7114,30 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
             newBaskets += 1+Int_t(totBytes/oldBsize);
             continue;
          }
-         Double_t bsize = oldBsize*idealFactor*memFactor; //bsize can be very large !
+         Double_t bsize = oldBsize*idealFactor*memFactor; // we shouldn't need memFactor, minimize bsize can be very large !
          if (bsize < 0) bsize = bmax;
          if (bsize > bmax) bsize = bmax;
          UInt_t newBsize = UInt_t(bsize);
-         if (pass) { // only on the second pass so that it doesn't interfere with scaling
+         //printf("newBsize @ 1: %d\n", newBsize); 
+	
+	      if (pass) { // only on the second pass so that it doesn't interfere with scaling
             // If there is an entry offset, it will be stored in the same buffer as the object data; hence,
             // we must bump up the size of the branch to account for this extra footprint.
             // If fAutoFlush is not set yet, let's assume that it is 'in the process of being set' to
             // the value of GetEntries().
+            
+            //printf("--> fAutoFlush= %lld\n",fAutoFlush);
             Long64_t clusterSize = (fAutoFlush > 0) ? fAutoFlush : branch->GetEntries();
+            //printf("--> clusterSize = %lld\n",clusterSize);
             if (branch->GetEntryOffsetLen()) {
+               //printf("--> branch->GetEntryOffsetLen(): ")
                newBsize = newBsize + (clusterSize * sizeof(Int_t) * 2);
+               //printf("--> clusterSize*sizeof(Int_t)*2 = %lld\n",(clusterSize*sizeof(Int_t)*2));
             }
-            // We used ATLAS fully-split xAOD for testing, which is a rather unbalanced TTree, 10K branches,
+		           
+            //printf("newBsize @ 2: %d\n", newBsize); 
+
+		      // We used ATLAS fully-split xAOD for testing, which is a rather unbalanced TTree, 10K branches,
             // with 8K having baskets smaller than 512 bytes. To achieve good I/O performance ATLAS uses auto-flush 100,
             // resulting in the smallest baskets being ~300-400 bytes, so this change increases their memory by about 8k*150B =~ 1MB,
             // at the same time it significantly reduces the number of total baskets because it ensures that all 100 entries can be
@@ -7123,12 +7145,20 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
             // structures we found a factor of 2 fewer baskets needed in the new scheme.
             // rounds up, increases basket size to ensure all entries fit into single basket as intended
             newBsize = newBsize - newBsize%512 + 512;
-         }
+         
+            //printf("newBsize @ 3: %d\n", newBsize); 
+	      }
          if (newBsize < sizeOfOneEntry) newBsize = sizeOfOneEntry;
-         if (newBsize < bmin) newBsize = bmin;
+            //printf("newBsize @ 4: %d\n", newBsize); 
+	      if (newBsize < bmin) newBsize = bmin;
+            //printf("newBsize @ 5: %d\n", newBsize); 
          if (newBsize > 10000000) newBsize = bmax;
+            //printf("newBsize @ 6: %d\n", newBsize); 
+
+
          if (pass) {
-            if (pDebug) Info("OptimizeBaskets", "Changing buffer size from %6d to %6d bytes for %s\n",oldBsize,newBsize,branch->GetName());
+            if(newBsize > configMaxSize) newBsize = configMaxSize;
+	         //printf("@6.5 Changing buffer size from %6d to %6d bytes for %s\n",oldBsize,newBsize,branch->GetName());
             branch->SetBasketSize(newBsize);
          }
          newMemsize += newBsize;
@@ -7145,11 +7175,17 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
             branch->SetCompressionSettings(ROOT::RCompressionSetting::EAlgorithm::kUseGlobal);
          }
       }
+      //printf("@7 maxMemory = %f; totBytes = %f; newMemsize: %f\n", Double_t(maxMemory), Double_t(GetTotBytes()),Double_t(newMemsize));
+
+
       // coverity[divide_by_zero] newMemsize can not be zero as there is at least one leaf
       memFactor = Double_t(maxMemory)/Double_t(newMemsize);
+      //printf("@8 Mem factor is: %f\n",memFactor);	
       if (memFactor > 100) memFactor = 100;
-      Double_t bmin_new = bmin*memFactor;
-      Double_t bmax_new = bmax*memFactor;
+      Double_t bmin_new = bmin*memFactor; // pass 0: 51,200; pass 1: 4,749,680
+      Double_t bmax_new = bmax*memFactor; // pass 0: 25,600,000 ; pass 1: 2.37 GB
+      //printf("@9 bmin_new = %f, bmax_new = %f, \n", bmin_new, bmax_new);
+
       static const UInt_t hardmax = 1*1024*1024*1024; // Really, really never give more than 1Gb to a single buffer.
 
       // Really, really never go lower than 8 bytes (we use this number
@@ -7165,6 +7201,9 @@ void TTree::OptimizeBaskets(ULong64_t maxMemory, Float_t minComp, Option_t *opti
       Info("OptimizeBaskets", "oldMemsize = %d,  newMemsize = %d\n",oldMemsize, newMemsize);
       Info("OptimizeBaskets", "oldBaskets = %d,  newBaskets = %d\n",oldBaskets, newBaskets);
    }
+	
+   //printf("@11 oldMemsize = %d,  newMemsize = %d\n",oldMemsize, newMemsize);
+   //printf("@11 oldBaskets = %d,  newBaskets = %d\n",oldBaskets, newBaskets);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -8335,6 +8374,35 @@ void TTree::SetAutoSave(Long64_t autos)
 {
    fAutoSave = autos;
 }
+
+
+
+//////////////////////////////////////////////////////////////////////////////
+/// Set the global maximum buffer size
+///
+/// can be set to 0, in which default ROOT settings will optimize up to the 25.6 MB Limit 
+
+void TTree::SetMaxBasketSize(UInt_t size){
+	fMaxBasketSize = size;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+/// Get the global maximum buffer size
+
+UInt_t TTree::GetMaxBasketSize(){
+	return fMaxBasketSize;
+}
+
+
+
+
+
+
+
+
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Set a branch's basket size.
