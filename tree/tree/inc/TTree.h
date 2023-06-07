@@ -150,6 +150,7 @@ protected:
 
    static Int_t     fgBranchStyle;        ///<  Old/New branch style
    static Long64_t  fgMaxTreeSize;        ///<  Maximum size of a file containing a Tree
+   static UInt_t    fMaxBasketSize;	  ///< User configured maximum basket size
 
 private:
    // For simplicity, although fIMTFlush is always disabled in non-IMT builds, we don't #ifdef it out.
@@ -310,7 +311,7 @@ public:
 
    TTree();
    TTree(const char* name, const char* title, Int_t splitlevel = 99, TDirectory* dir = gDirectory);
-   ~TTree() override;
+   virtual ~TTree();
 
    TTree(const TTree& tt) = delete;
    TTree& operator=(const TTree& tt) = delete;
@@ -619,6 +620,8 @@ public:
    virtual void            SetMakeClass(Int_t make);
    virtual void            SetMaxEntryLoop(Long64_t maxev = kMaxEntries) { fMaxEntryLoop = maxev; } // *MENU*
    static  void            SetMaxTreeSize(Long64_t maxsize = 100000000000LL);
+   static  void            SetMaxBasketSize(UInt_t maxbranchsize = 0);
+   static  UInt_t          GetMaxBasketSize();
    virtual void            SetMaxVirtualSize(Long64_t size = 0) { fMaxVirtualSize = size; } // *MENU*
            void            SetName(const char* name) override; // *MENU*
 
@@ -676,7 +679,7 @@ protected:
 public:
    TTreeFriendLeafIter(const TTree* t, Bool_t dir = kIterForward);
    TTreeFriendLeafIter(const TTreeFriendLeafIter &iter);
-   ~TTreeFriendLeafIter() override { SafeDelete(fLeafIter); SafeDelete(fTreeIter); }
+   ~TTreeFriendLeafIter() { SafeDelete(fLeafIter); SafeDelete(fTreeIter); }
    TIterator &operator=(const TIterator &rhs) override;
    TTreeFriendLeafIter &operator=(const TTreeFriendLeafIter &rhs);
 
